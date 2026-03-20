@@ -13,3 +13,4 @@ disable-model-invocation: true
    - Bullet points summarizing what changed
 4. Keep it concise. No fluff.
 5. ALWAYS write to the file. NEVER output the message in chat.
+6. Do NOT run `git commit`. Only write the message file. The user will commit manually.
