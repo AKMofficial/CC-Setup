@@ -7,7 +7,9 @@ disable-model-invocation: true
 
 **READ-ONLY. Do NOT edit, write, or modify any file. Only read and report.**
 
-1. Run `git diff` to see all unstaged changes.
+**Focus: The final result and user experience must be IDENTICAL 100%. These should only be cleaner/better code that produces the exact same output.**
+
+1. Run `git diff` (NOT `git diff --cached`) to see ONLY unstaged changes. Ignore staged changes entirely.
 2. For each changed file, verify:
    - **Same final result**: `1+1` → `2` is FINE. Only flag changes where the output/behavior actually differs.
    - **Same UI/design**: Layout, ordering, spacing, colors, animations, hover effects, transitions - identical to the user.

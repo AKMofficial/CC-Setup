@@ -114,16 +114,38 @@ if echo "$CMD" | grep -qE 'git\s+branch\s+.*-D\b'; then
   exit 2
 fi
 
-# Git checkout -- / git restore (discards uncommitted changes)
+# Git checkout (discards uncommitted changes — only allow branch switching)
+# Block: git checkout -- <file>, git checkout <file>, git checkout .
+# Allow: git checkout <branch>, git checkout -b <branch> (handled by not matching -b flag)
 if echo "$CMD" | grep -qE 'git\s+checkout\s+--\s+' || \
-   echo "$CMD" | grep -qE 'git\s+restore\s+'; then
-  echo "BLOCKED: git restore/checkout -- discards uncommitted changes." >&2
+   echo "$CMD" | grep -qE 'git\s+checkout\s+\.' || \
+   echo "$CMD" | grep -qE 'git\s+checkout\s+[^-]\S*\.(ts|tsx|js|jsx|json|css|scss|html|sh|md|py|go|rs|vue|svelte|yaml|yml|toml|sql)\b'; then
+  echo "BLOCKED: git checkout discards uncommitted changes." >&2
   exit 2
 fi
 
-# Git stash drop/clear (permanently lose stashed work)
-if echo "$CMD" | grep -qE 'git\s+stash\s+(drop|clear)'; then
-  echo "BLOCKED: git stash drop/clear loses stashed work permanently." >&2
+# Git restore (discards uncommitted changes)
+if echo "$CMD" | grep -qE 'git\s+restore\s+'; then
+  echo "BLOCKED: git restore discards uncommitted changes." >&2
+  exit 2
+fi
+
+# Git stash — all subcommands blocked (never touch working tree or stash)
+if echo "$CMD" | grep -qE 'git\s+stash(\s|$)'; then
+  echo "BLOCKED: git stash is fully disabled. Never move, stage, or lose changes via stash." >&2
+  exit 2
+fi
+
+# Git add — staging files blocked (user controls what gets staged)
+if echo "$CMD" | grep -qE 'git\s+add(\s|$)'; then
+  echo "BLOCKED: git add is disabled. User controls staging." >&2
+  exit 2
+fi
+
+# Git reset/restore --staged — unstaging files blocked
+if echo "$CMD" | grep -qE 'git\s+reset(\s|$)' || \
+   echo "$CMD" | grep -qE 'git\s+restore\s+--staged'; then
+  echo "BLOCKED: Unstaging files is disabled. User controls staging." >&2
   exit 2
 fi
 

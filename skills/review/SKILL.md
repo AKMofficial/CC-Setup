@@ -172,6 +172,18 @@ Skip this section entirely if the project has no test files or testing setup. On
 - Test files changed but assertions don't actually validate the new behavior
 - Mocked dependencies that hide the bug being fixed
 
+### 5l. Best Practices
+
+Flag code that works but uses a suboptimal approach when a clearly superior industry-standard alternative exists for the use case. Only flag when the better approach has concrete advantages - not when trade-offs are genuinely debatable.
+
+- Wrong protocol/transport for the use case
+- Using a less efficient or outdated method when a better one exists for the same task
+- Sequential awaits when operations are independent
+- Wrong data structure for the access pattern
+- Missing connection pooling, caching, or retry logic where clearly needed
+- Rolling custom solutions when the framework provides proven built-in alternatives
+- Derived state manually synced instead of computed
+
 ---
 
 ## Step 6: Adversarial Re-Read & Self-Verification

@@ -10,7 +10,7 @@ disable-model-invocation: true
 3. Format:
    - First line: conventional commit title (e.g. `feat: add editor change popover`)
    - Blank line
-   - Bullet points summarizing what changed
-4. Keep it concise. No fluff.
+   - Bullet points summarizing what changed (keep each point under 80 chars)
+4. Keep it concise. No fluff. Short punchy bullets, not paragraphs.
 5. ALWAYS write to the file. NEVER output the message in chat.
 6. Do NOT run `git commit`. Only write the message file. The user will commit manually.
