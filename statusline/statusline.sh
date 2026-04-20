@@ -38,7 +38,7 @@ WHITE='\033[37m'
 GRAY='\033[90m'
 
 # ── Read stdin JSON ──
-INPUT=$(</dev/stdin)
+INPUT=$(cat)
 
 # Single jq call to extract all needed fields (tab-separated)
 # Clean model name in jq: strip everything from " (" onward
