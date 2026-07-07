@@ -26,15 +26,17 @@ Cursor auto-loads the project's rule files (`CLAUDE.md` / `AGENTS.md` / `.cursor
 
 ## The loop
 
+**Fix-list, not a feature?** If the request is already concrete findings (`/code-review`, `/simplify`, a bug list), skip the PRD — pass them to Cursor inline as the task (numbered), then run the same review → gates → loop. Write the full spec below only for open-ended features.
+
 ### 1. Author the spec (you, the reviewer)
 
 The spec is the single biggest lever on how well Cursor does. A fast model like `composer-2.5-fast` **does not fill gaps with engineering judgment — it produces statistically plausible completions**. Every ambiguity you leave becomes a wrong guess and another review round. Invest here.
 
 First **read enough of the codebase to write with specifics, not hand-waving** — real file paths, real function names, real patterns. A spec that says "add validation" is worthless; one that names the existing validation schema/util to reuse and its path is executable.
 
-**After you've checked the code, if anything is unclear, ask the user before writing the spec — even if it's 20 questions.** Better to resolve ambiguity now than to bake a wrong assumption into the spec and burn Cursor rounds on it. The `AskUserQuestion` tool caps at 4 questions per call, so ask in batches of up to 4 until everything is clear.
+**After you've checked the code, if anything is unclear, ask the user before writing the spec — even if it's 20 questions. Make it in batches.**
 
-Write the spec as a PRD to `./tmp/cursor-implement/<feature-slug>.md` — a kebab-case name from the task (e.g. `textarea-counters.md`); create the folder if needed. One temp folder keeps the repo root clean and lets specs coexist. Use this same path everywhere below. **Never delete it — leave it for the user.** A file path beats a giant inline prompt.
+Write the spec as a PRD to `./tmp/cursor-implement/<feature-slug>.md`. **Never delete it — leave it for the user.** A file path beats a giant inline prompt.
 
 - **Goal & why** — what's being built and the user need behind it, in a line.
 - **Acceptance criteria** — numbered, deterministic, testable outcomes (input → expected output where it matters). This is the contract you verify against at the end.
@@ -104,8 +106,6 @@ Then go back to **step 3**. Repeat the review → gates → notes cycle until:
 - all gates pass,
 - **no notes remain at all — every one, however minor.**
 
-**Keep the spec live.** If a decision or requirement changes mid-loop, update the spec file before the next round so it stays the source of truth you verify against.
-
 Cap at ~5 rounds. If Cursor loops or regresses, STOP and report what's stuck and which files (with the diff summary) — don't burn rounds. The revert rule from step 3 applies: undo only Cursor's mistakes, never the user's work.
 
 ## Approval gate (auto-approve criteria)
@@ -118,7 +118,7 @@ The user chose **auto-approve on green** — but only with rigorous verification
 - [ ] The change is complete end-to-end — no TODOs, stubs, dead code, half-wired features, or unhandled edge cases from the spec.
 - [ ] Scope matches the spec — nothing unrelated was changed or deleted.
 
-If every box is checked, **approve** and report to the user (see below). Leave the spec file in place (never delete it — the user handles it) and leave changes uncommitted for them to commit.
+If every box is checked, **approve** and report to the user (see below). Leave changes uncommitted for them to commit.
 
 If any box is **not** checkable with confidence, do NOT auto-approve. Stop, show the user the diff summary, the exact box(es) you couldn't check, and your remaining concern, and ask how to proceed.
 
@@ -133,11 +133,9 @@ When done (approved or stopped), give the user:
 - **Manual follow-ups** — any side-effecting commands the change needs that you deliberately did NOT run (DB migration/push, dependency install, deploy, etc.), spelled out for the user to run themselves. Say "none" if there are none.
 - **Verdict** — approved (and "ready to commit"), or stopped-with-concerns.
 
-Keep an `★ Insight` block if there's something genuinely instructive about how Cursor solved it or where it needed correction.
-
 ## Notes
 
-- Assumes `cursor-agent` is installed and authenticated (logged in, or `CURSOR_API_KEY` set). If a dispatch fails with an auth error, tell the user to run `cursor-agent login` and stop.
+- Assumes `cursor-agent` is installed and logged in — don't pre-check auth; just dispatch. Only if a dispatch returns an auth error, tell the user to run `cursor-agent login` and stop.
 - `--continue` resumes the most recent session in this workspace, so the loop stays cheap (Cursor keeps its context; you send only deltas).
 - If the user's request includes a model override (e.g. "use gpt-5"), honor it via `--model` but keep everything else identical.
 - `--mode plan` (read-only) is available if you want Cursor to propose a plan before writing on a risky/large task — optional, use judgment.
