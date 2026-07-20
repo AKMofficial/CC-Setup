@@ -142,6 +142,14 @@ if echo "$CMD" | grep -qE 'git\s+add(\s|$)'; then
   exit 2
 fi
 
+# Git commit — committing is blocked (user controls commits). Also catches
+# `git -C <dir> commit` and flag variants so it can't be dodged from another
+# working directory.
+if echo "$CMD" | grep -qE 'git\s+((-C\s+\S+|--?[A-Za-z-]+(=\S+)?)\s+)*commit(\s|$)'; then
+  echo "BLOCKED: git commit is disabled. User controls commits." >&2
+  exit 2
+fi
+
 # Git reset/restore --staged — unstaging files blocked
 if echo "$CMD" | grep -qE 'git\s+reset(\s|$)' || \
    echo "$CMD" | grep -qE 'git\s+restore\s+--staged'; then

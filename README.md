@@ -119,7 +119,7 @@ npm install -g ccusage
 
 | Hook                         | Event             | What it blocks                                                                                                                                                          |
 | ---------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **block-dangerous-commands** | PreToolUse (Bash) | sudo, doas, eval, rm on system/home dirs, git force push/reset/clean/restore/rebase, DROP/TRUNCATE/DELETE, curl pipe to shell, npm publish, fork bombs, disk format ops |
+| **block-dangerous-commands** | PreToolUse (Bash) | sudo, doas, eval, rm on system/home dirs, git add/commit (user controls staging and commits), git force push/reset/clean/restore/rebase, DROP/TRUNCATE/DELETE, curl pipe to shell, npm publish, fork bombs, disk format ops |
 | **block-worktrees** | PreToolUse (Agent, EnterWorktree, Bash) | All git worktree creation — `EnterWorktree` tool, Agent `isolation: "worktree"`, and `git worktree add` (allows list/remove/prune). Pair with `worktree.bgIsolation: "none"` in settings to also stop automatic background-isolation worktrees. |
 | **notify-stop-sound** | Stop | Plays a sound when Claude finishes a turn, but only in the main chat — silent for background subagents (skips when the hook payload carries an `agent_id`). |
 

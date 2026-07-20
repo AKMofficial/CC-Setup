@@ -41,11 +41,12 @@ Write the spec as a PRD to `./tmp/cursor-implement/<feature-slug>.md`. **Never d
 - **Goal & why** — what's being built and the user need behind it, in a line.
 - **Acceptance criteria** — numbered, deterministic, testable outcomes (input → expected output where it matters). This is the contract you verify against at the end.
 - **Edge cases** — list them explicitly (empty, permission-denied, invalid input, boundaries, concurrency, overflow, i18n). Unlisted = unhandled.
-- **Files to touch** — the files you expect Cursor to create/modify, with real paths. Your scope checklist at review; if you can't predict one, say so.
+- **Design decisions** — make the design calls yourself before any code exists: file/module structure, interfaces and function signatures, data shapes, error-handling strategy. Record each decision with a one-line **why**. Anything you leave open, the implementer decides by statistical guess — the spec should leave nothing to interpret.
+- **Files to touch** — the files you expect the implementer to create/modify, with real paths. Your scope checklist at review; if you can't predict one, say so.
 - **Existing code to reuse** — the files/components/utilities to build on, with real paths (from step 0).
 - **A concrete example** — one worked input → expected output, where behavior is non-obvious.
-- **Project constraints (only the risky ones)** — Cursor already has the rulebook; call out just the one or two rules this task is likely to trip. Skip if none.
-- **Out of scope** — what to leave alone, so Cursor doesn't widen scope.
+- **Project constraints (only the risky ones)** — the implementer already has the rulebook; call out just the one or two rules this task is likely to trip. Skip if none.
+- **Out of scope** — what to leave alone, so the implementer doesn't widen scope.
 
 Keep it at the right **altitude**: outcomes and the modules to change, not line-by-line pseudocode nor a vague one-liner. Break a large task into chunks you can verify one at a time.
 
@@ -53,8 +54,14 @@ Show the user a short summary (goal + acceptance criteria) before dispatching so
 
 ### 2. Dispatch Cursor (first round)
 
+First create a dedicated chat for this run — every round uses its ID via `--resume`:
+
 ```bash
-cursor-agent -p --force --trust --output-format text --model composer-2.5-fast \
+CHAT_ID=$(cursor-agent create-chat)
+```
+
+```bash
+cursor-agent -p --force --trust --output-format text --model composer-2.5-fast --resume "<chat-id>" \
   "Implement the spec in ./tmp/cursor-implement/<feature-slug>.md exactly. Follow every project constraint listed there. \
 Preserve unrelated user changes — touch only what this task needs. Do NOT edit global/system config. \
 Do NOT run irreversible or externally-visible commands — no deploys/publishes, no database migrations/pushes/seeds (drizzle-kit push/migrate, prisma migrate, etc.). If the change needs such a step to take effect, describe it in your summary instead of running it. \
@@ -73,6 +80,7 @@ Do a genuine senior review of what Cursor actually did:
 3. **Check the project's invariants** a compiler won't catch — auth/permission checks, logging/audit, data-access filters, i18n, safe queries.
 4. **Verify each acceptance criterion** is actually implemented, not gestured at.
 5. **Watch for model mistakes** — hallucinated imports/paths, half-done edits, dead code, abandoned files, scope creep.
+6. **Audit tests** — if the implementer wrote or touched tests, check it didn't game them: hardcoded expected outputs, weakened assertions, skipped/deleted tests.
 
 Produce a **numbered notes list**: each note is a concrete, actionable defect with the file:line and what's wrong. Rank by severity so Cursor fixes the worst first, but **every note must be resolved before approval — minor and polish ones included, not just the critical ones.**
 
@@ -94,7 +102,7 @@ Use the actual scripts the project defines (e.g. a `package.json` "typecheck"/"l
 If there are any notes at all, continue Cursor's existing session so it keeps its context:
 
 ```bash
-cursor-agent -p --force --trust --continue --output-format text --model composer-2.5-fast \
+cursor-agent -p --force --trust --output-format text --model composer-2.5-fast --resume "<chat-id>" \
   "Review notes to address. Fix each, keep changes uncommitted, don't touch git. \
 1. <note> \
 2. <note> \
@@ -136,6 +144,6 @@ When done (approved or stopped), give the user:
 ## Notes
 
 - Assumes `cursor-agent` is installed and logged in — don't pre-check auth; just dispatch. Only if a dispatch returns an auth error, tell the user to run `cursor-agent login` and stop.
-- `--continue` resumes the most recent session in this workspace, so the loop stays cheap (Cursor keeps its context; you send only deltas).
+- `create-chat` + `--resume <chat-id>` pins every round to this run's own session, so the loop stays cheap (Cursor keeps its context; you send only deltas) and several runs can go in parallel Claude sessions safely. Never use `--continue` or a bare `--resume` — they grab the workspace's most recent session, which may belong to another run.
 - If the user's request includes a model override (e.g. "use gpt-5"), honor it via `--model` but keep everything else identical.
 - `--mode plan` (read-only) is available if you want Cursor to propose a plan before writing on a risky/large task — optional, use judgment.
