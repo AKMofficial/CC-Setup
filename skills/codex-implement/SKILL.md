@@ -1,6 +1,6 @@
 ---
 name: codex-implement
-description: Implement a feature or fix by delegating the coding to OpenAI's Codex CLI (codex exec, model gpt-5.5 at medium reasoning) while Claude Code acts as spec author and reviewer. Claude writes a detailed spec, dispatches Codex to implement, reviews Codex's diff against the project's own conventions, sends notes back into the SAME Codex session, and loops until every gate is green and no notes remain. Auto-approves ONLY after rigorous verification that the plan is completely fulfilled. Use when the user says "/codex-implement <what they want>" or asks to have Codex implement something with Claude reviewing.
+description: Implement a feature or fix by delegating the coding to OpenAI's Codex CLI (codex exec, using the user's default model from ~/.codex/config.toml) while Claude Code acts as spec author and reviewer. Claude writes a detailed spec, dispatches Codex to implement, reviews Codex's diff against the project's own conventions, sends notes back into the SAME Codex session, and loops until every gate is green and no notes remain. Auto-approves ONLY after rigorous verification that the plan is completely fulfilled. Use when the user says "/codex-implement <what they want>" or asks to have Codex implement something with Claude reviewing.
 ---
 
 # codex-implement — Codex implements, Claude Code reviews & approves
@@ -17,7 +17,7 @@ The user's request is in `$ARGUMENTS`. If it's empty, ask what to build and stop
 - **Codex must not touch git** (commit, push, history) — tell it so in the dispatch prompt; you review an uncommitted diff. **You don't commit or push either**, unless the user asks after approval.
 - **Always run with `--sandbox workspace-write`.** Default is read-only (Codex can't edit), and `--dangerously-bypass-approvals-and-sandbox` is the opposite extreme — never use it. `workspace-write` lets Codex edit the tree while its sandbox blocks network and out-of-workspace writes.
 - **Don't run irreversible or externally-visible commands — leave those to the user.** Deploys / publishes, DB migrations / schema pushes / seeds, destructive SQL, and the like. If the change needs such a step to take effect, don't run it — note it as a **manual follow-up** and tell Codex the same. (The sandbox already blocks most of this; the rule covers the rest.)
-- **Model is fixed: `gpt-5.5` at `medium` reasoning** unless the user overrides it. It's capable, but it still fills ambiguity with plausible guesses rather than your intent — review hard and iterate until the code is genuinely clean and correct. "It typechecks" is the floor, not the bar.
+- **Never pass `-m` / `--model` or `-c model_reasoning_effort`** unless the user explicitly overrides — Codex uses the `model` / `model_reasoning_effort` defaults from `~/.codex/config.toml` (whatever the user last saved via `/model`). That model may be strong or weak; you don't know, so review hard either way and iterate until the code is genuinely clean and correct. "It typechecks" is the floor, not the bar.
 - **Auto-approve only when the Approval gate checklist is fully met.** If anything is uncertain, stop and show the user the diff + your concerns.
 - **The project's conventions apply even though Codex wrote the code** — you're accountable as if you wrote it.
 
@@ -31,7 +31,7 @@ Learn the project's non-negotiables and reusable utilities from its convention d
 
 ### 1. Author the spec (you, the reviewer)
 
-The spec is the single biggest lever on how well Codex does. `gpt-5.5` at medium is capable, but every ambiguity you leave becomes a plausible-but-wrong guess and another review round. Invest here.
+The spec is the single biggest lever on how well Codex does. Every ambiguity you leave becomes a plausible-but-wrong guess and another review round. Invest here.
 
 First **read enough of the codebase to write with specifics, not hand-waving** — real file paths, real function names, real patterns. A spec that says "add validation" is worthless; one that names the existing validation schema/util to reuse and its path is executable.
 
@@ -56,7 +56,7 @@ Show the user a short summary (goal + acceptance criteria) before dispatching so
 ### 2. Dispatch Codex (first round)
 
 ```bash
-codex exec --sandbox workspace-write -m gpt-5.5 -c model_reasoning_effort=medium \
+codex exec --sandbox workspace-write \
   "Implement the spec in ./tmp/codex-implement/<feature-slug>.md exactly. Follow every project constraint listed there. \
 Preserve unrelated user changes — touch only what this task needs. Do NOT edit global/system config. \
 Do NOT run irreversible or externally-visible commands — no deploys/publishes, no database migrations/pushes/seeds (drizzle-kit push/migrate, prisma migrate, etc.). If the change needs such a step to take effect, describe it in your summary instead of running it. \
@@ -99,7 +99,7 @@ Use the actual scripts the project defines (e.g. a `package.json` "typecheck"/"l
 If there are any notes at all, resume Codex's existing session so it keeps its context:
 
 ```bash
-codex exec resume <session-id> -m gpt-5.5 -c model_reasoning_effort=medium -c sandbox_mode=workspace-write \
+codex exec resume <session-id> -c sandbox_mode=workspace-write \
   "Review notes to address. Fix each, keep changes uncommitted, don't touch git. \
 1. <note> \
 2. <note> \
@@ -143,5 +143,5 @@ When done (approved or stopped), give the user:
 - Assumes `codex` is installed and logged in — don't pre-check auth; just dispatch. Only if a dispatch returns an auth error, tell the user to run `codex login` and stop.
 - Round 1 is `codex exec …`; every later round is `codex exec resume <session-id> …` with the UUID from round 1's header, which continues this run's own session so the loop stays cheap (Codex keeps its context; you send only deltas) and several runs can go in parallel Claude sessions safely. Never use `resume --last` — it grabs the machine's most recent session, which may belong to another run.
 - `--sandbox workspace-write` is required for Codex to edit files. `resume` has no `-s` flag, so it takes the sandbox via `-c sandbox_mode=workspace-write` (as shown above).
-- If the user overrides the model/effort (e.g. "use gpt-5.5 high"), pass it via `-m` / `-c model_reasoning_effort=…` but keep everything else identical.
+- If the user's request includes a model/effort override (e.g. "use gpt-5.5 high"), honor it via `-m` / `-c model_reasoning_effort=…` but keep everything else identical.
 - `--sandbox read-only` (or `codex exec review`) is available if you want Codex to analyze/propose without writing on a risky task — optional, use judgment.
