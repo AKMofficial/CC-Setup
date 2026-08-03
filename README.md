@@ -33,6 +33,7 @@ cp statusline/statusline-refresh.sh ~/.claude/statusline-refresh.sh
 Add hooks and status line config (merge with any existing settings):
 
 ```json
+"cleanupPeriodDays": 99999,
 "env": {
   "CLAUDE_AFK_TIMEOUT_MS": "2147483647"
 },
@@ -79,6 +80,7 @@ Add hooks and status line config (merge with any existing settings):
 }
 ```
 
+- `cleanupPeriodDays: 99999` keeps chat transcripts/session data effectively forever (~273 years). Claude Code auto-deletes session files older than this on startup; the default is only 30 days and there is no "never" value, so a large number is the supported way to retain history. [Docs](https://code.claude.com/docs/en/settings)
 - `env.CLAUDE_AFK_TIMEOUT_MS` (≈ max int) disables the AFK/idle timeout, so long-running prompts (e.g. `AskUserQuestion`) don't time out.
 - The `Stop` hook runs `notify-stop-sound.sh`, which plays a sound when Claude finishes a turn — but **only in the main chat**, staying silent when a background subagent/Agent-tool task completes (it reads the hook's JSON stdin and skips the sound when an `agent_id` is present). macOS `afplay`; swap the command inside the script on Linux/WSL.
 - `worktree.bgIsolation: "none"` is required alongside the worktree hook: the hook blocks *explicit* worktree tool calls, but the harness's automatic background-isolation worktree is governed only by this setting.
