@@ -8,10 +8,11 @@ My Claude Code setup - skills, hooks, status line, and settings config. Copy to 
 
 ```bash
 # Skills
-mkdir -p ~/.claude/skills/commit ~/.claude/skills/verify ~/.claude/skills/review ~/.claude/skills/cursor-implement ~/.claude/skills/codex-implement ~/.claude/skills/opencode-implement
+mkdir -p ~/.claude/skills/commit ~/.claude/skills/verify ~/.claude/skills/review ~/.claude/skills/qa ~/.claude/skills/cursor-implement ~/.claude/skills/codex-implement ~/.claude/skills/opencode-implement
 cp skills/commit/SKILL.md ~/.claude/skills/commit/SKILL.md
 cp skills/verify/SKILL.md ~/.claude/skills/verify/SKILL.md
 cp skills/review/SKILL.md ~/.claude/skills/review/SKILL.md
+cp skills/qa/SKILL.md ~/.claude/skills/qa/SKILL.md
 cp skills/cursor-implement/SKILL.md ~/.claude/skills/cursor-implement/SKILL.md
 cp skills/codex-implement/SKILL.md ~/.claude/skills/codex-implement/SKILL.md
 cp skills/opencode-implement/SKILL.md ~/.claude/skills/opencode-implement/SKILL.md
@@ -113,6 +114,7 @@ npm install -g ccusage
 | **commit** | `/commit` | Reads staged changes, writes a changelog-style commit message (sized to the change) to `COMMIT_MESSAGE.md` |
 | **review** | `/review` | Full code review on uncommitted changes - bugs, security, types, logic, performance   |
 | **verify** | `/verify` | Reviews unstaged changes - reports if they're safe, worth staging, or break something |
+| **qa** | `/qa [staged\|unstaged] <the feature request>` | Feature review of changes (e.g. written by another AI agent) against what was asked - checks every requirement is done, finds bugs and missed places, checks it matches the project's style/UI and is light and fast, researches known pitfalls on the web, and lists unrelated changes in the diff neutrally |
 | **cursor-implement** | `/cursor-implement <what to build>` | Delegates coding to Cursor's headless agent (`cursor-agent`, `composer-2.5-fast`) while Claude writes the spec, reviews the diff, and loops until every gate is green. Requires `cursor-agent` installed and authenticated. |
 | **codex-implement** | `/codex-implement <what to build>` | Same spec-author/reviewer loop, but delegates coding to OpenAI's Codex CLI (`codex exec`), using whatever default model/effort is saved in `~/.codex/config.toml` (set via `/model` in Codex). Requires `codex` installed and authenticated. |
 | **opencode-implement** | `/opencode-implement <what to build>` | Same spec-author/reviewer loop, but delegates coding to opencode's headless CLI (`opencode run`), using whatever model is currently selected in opencode. Requires `opencode` installed and authenticated. |
