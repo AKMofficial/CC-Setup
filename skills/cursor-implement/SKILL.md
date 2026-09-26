@@ -14,7 +14,7 @@ The user's request is in `$ARGUMENTS`. If it's empty, ask what to build and stop
 ## Hard rules (never violate)
 
 - **Never pass `-w` / `--worktree` to cursor-agent** — Cursor works in the current tree so you review the exact diff the user sees.
-- **Cursor must not touch git** (commit, push, history) — tell it so in the dispatch prompt; you review an uncommitted diff. **You don't commit or push either**, unless the user asks after approval.
+- **Cursor must not touch git** (commit, push, history) — tell it so in the dispatch prompt; you review an uncommitted diff. **You don't commit either** (a hook blocks `git commit`; the user commits), and don't push unless the user asks after approval.
 - **Don't run irreversible or externally-visible commands — leave those to the user.** Deploys / publishes, DB migrations / schema pushes / seeds, destructive SQL, and the like. If the change needs such a step to take effect, don't run it — note it as a **manual follow-up** and tell Cursor the same.
 - **Model is fixed: `composer-2.5-fast`** unless the user overrides it. It's fast and cheap, so expect a flawed first draft — review hard and iterate until the code is genuinely clean and correct. "It typechecks" is the floor, not the bar.
 - **Auto-approve only when the Approval gate checklist is fully met.** If anything is uncertain, stop and show the user the diff + your concerns.

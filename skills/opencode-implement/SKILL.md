@@ -14,7 +14,7 @@ The user's request is in `$ARGUMENTS`. If it's empty, ask what to build and stop
 ## Hard rules (never violate)
 
 - **opencode runs in the current working tree** (`opencode run` uses the cwd) so you review the exact diff the user sees. Never point it elsewhere with `--dir`.
-- **opencode must not touch git** (commit, push, history) — tell it so in the dispatch prompt; you review an uncommitted diff. **You don't commit or push either**, unless the user asks after approval.
+- **opencode must not touch git** (commit, push, history) — tell it so in the dispatch prompt; you review an uncommitted diff. **You don't commit either** (a hook blocks `git commit`; the user commits), and don't push unless the user asks after approval.
 - **Don't run irreversible or externally-visible commands — leave those to the user.** Deploys / publishes, DB migrations / schema pushes / seeds, destructive SQL, and the like. If the change needs such a step to take effect, don't run it — note it as a **manual follow-up** and tell opencode the same.
 - **Never pass `-m` / `--model`** unless the user explicitly overrides — opencode uses whatever model the user has currently selected in opencode. That model may be strong or weak; you don't know, so review hard either way and iterate until the code is genuinely clean and correct. "It typechecks" is the floor, not the bar.
 - **Never pass `--auto`** — it auto-approves permissions the user's opencode config would gate. If a run stalls or fails on a permission, stop and tell the user instead of forcing it.

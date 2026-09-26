@@ -19,7 +19,7 @@ The user gets many short, vague requests from stakeholders. Your job is to do th
 
 ## 2. Research before asking anything
 
-Do this silently. Never ask the user something the code or the web can answer.
+Do this before asking anything: don't ask the user what the code or the web can answer.
 
 - **Codebase** (use an Explore agent for broad sweeps): how the related parts work today, and **every place this would touch**. Think beyond the obvious screen: admin/dashboard, API, database and migrations, permissions and roles, settings, notifications, analytics/events, feature flags or experiments, i18n, emails, exports, existing tests, and other features that would behave differently because of this one.
 - **Existing patterns:** how similar features were built here, so the spec fits our style, UI, and structure.
