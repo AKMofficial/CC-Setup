@@ -8,21 +8,20 @@ My Claude Code setup - skills, hooks, status line, and settings config. Copy to 
 
 ```bash
 # Skills
-mkdir -p ~/.claude/skills/commit ~/.claude/skills/verify ~/.claude/skills/qa ~/.claude/skills/spec ~/.claude/skills/cursor-implement ~/.claude/skills/codex-implement ~/.claude/skills/opencode-implement
+mkdir -p ~/.claude/skills/commit ~/.claude/skills/verify ~/.claude/skills/qa ~/.claude/skills/spec ~/.claude/skills/implement
 cp skills/commit/SKILL.md ~/.claude/skills/commit/SKILL.md
 cp skills/verify/SKILL.md ~/.claude/skills/verify/SKILL.md
 cp skills/qa/SKILL.md ~/.claude/skills/qa/SKILL.md
 cp skills/spec/SKILL.md ~/.claude/skills/spec/SKILL.md
-cp skills/cursor-implement/SKILL.md ~/.claude/skills/cursor-implement/SKILL.md
-cp skills/codex-implement/SKILL.md ~/.claude/skills/codex-implement/SKILL.md
-cp skills/opencode-implement/SKILL.md ~/.claude/skills/opencode-implement/SKILL.md
+cp skills/implement/SKILL.md ~/.claude/skills/implement/SKILL.md
 
 # Hooks
 mkdir -p ~/.claude/hooks
 cp hooks/block-dangerous-commands.sh ~/.claude/hooks/block-dangerous-commands.sh
 cp hooks/block-worktrees.sh ~/.claude/hooks/block-worktrees.sh
 cp hooks/notify-stop-sound.sh ~/.claude/hooks/notify-stop-sound.sh
-chmod +x ~/.claude/hooks/block-dangerous-commands.sh ~/.claude/hooks/block-worktrees.sh ~/.claude/hooks/notify-stop-sound.sh
+cp hooks/block-em-dashes.sh ~/.claude/hooks/block-em-dashes.sh
+chmod +x ~/.claude/hooks/block-dangerous-commands.sh ~/.claude/hooks/block-worktrees.sh ~/.claude/hooks/notify-stop-sound.sh ~/.claude/hooks/block-em-dashes.sh
 
 # Status Line
 cp statusline/statusline.sh ~/.claude/statusline.sh
@@ -57,6 +56,15 @@ Add hooks and status line config (merge with any existing settings):
           "command": "$HOME/.claude/hooks/block-worktrees.sh"
         }
       ]
+    },
+    {
+      "matcher": "Write|Edit|MultiEdit|NotebookEdit|Bash|PowerShell",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "$HOME/.claude/hooks/block-em-dashes.sh"
+        }
+      ]
     }
   ],
   "Stop": [
@@ -83,7 +91,7 @@ Add hooks and status line config (merge with any existing settings):
 
 - `cleanupPeriodDays: 99999` keeps chat transcripts/session data effectively forever (~273 years). Claude Code auto-deletes session files older than this on startup; the default is only 30 days and there is no "never" value, so a large number is the supported way to retain history. [Docs](https://code.claude.com/docs/en/settings)
 - `env.CLAUDE_AFK_TIMEOUT_MS` (≈ max int) disables the AFK/idle timeout, so long-running prompts (e.g. `AskUserQuestion`) don't time out.
-- The `Stop` hook runs `notify-stop-sound.sh`, which plays a sound when Claude finishes a turn — but **only in the main chat**, staying silent when a background subagent/Agent-tool task completes (it reads the hook's JSON stdin and skips the sound when an `agent_id` is present). macOS `afplay`; swap the command inside the script on Linux/WSL.
+- The `Stop` hook runs `notify-stop-sound.sh`, which plays a sound when Claude finishes a turn, but **only in the main chat**, staying silent when a background subagent/Agent-tool task completes (it reads the hook's JSON stdin and skips the sound when an `agent_id` is present). macOS `afplay`; swap the command inside the script on Linux/WSL.
 - `worktree.bgIsolation: "none"` is required alongside the worktree hook: the hook blocks *explicit* worktree tool calls, but the harness's automatic background-isolation worktree is governed only by this setting.
 
 ### 3. Dependencies
@@ -115,11 +123,9 @@ npm install -g ccusage
 | **verify** | `/verify` | Reviews unstaged changes - reports if they're safe, worth staging, or break something |
 | **qa** | `/qa [staged\|unstaged] <the feature request>` | Feature review of changes (e.g. written by another AI agent) against what was asked - checks every requirement is done, finds bugs and missed places, checks it matches the project's style/UI and is light and fast, researches known pitfalls on the web, and lists unrelated changes in the diff neutrally |
 | **spec** | `/spec <the rough idea>` | Turns a vague feature request into a full spec: researches the codebase and the web, asks only the real product decisions in batches of up to 4, then writes `specs/<feature>.md` with flows, every affected place, edge cases, approach, open stakeholder questions, and acceptance criteria |
-| **cursor-implement** | `/cursor-implement <what to build>` | Delegates coding to Cursor's headless agent (`cursor-agent`, `composer-2.5-fast`) while Claude writes the spec, reviews the diff, and loops until every gate is green. Requires `cursor-agent` installed and authenticated. |
-| **codex-implement** | `/codex-implement <what to build>` | Same spec-author/reviewer loop, but delegates coding to OpenAI's Codex CLI (`codex exec`), using whatever default model/effort is saved in `~/.codex/config.toml` (set via `/model` in Codex). Requires `codex` installed and authenticated. |
-| **opencode-implement** | `/opencode-implement <what to build>` | Same spec-author/reviewer loop, but delegates coding to opencode's headless CLI (`opencode run`), using whatever model is currently selected in opencode. Requires `opencode` installed and authenticated. |
+| **implement** | `/implement [codex\|cursor\|opencode][:model] <what to build>` | Delegates coding to another AI CLI (Codex, Cursor, or opencode) while Claude writes the spec, reviews the diff, and loops until every gate is green. Default tool and per-tool models are set in the skill's Config block; pick another per run with e.g. `/implement cursor ...` or `/implement codex:gpt-5.5 ...`. Starts a fresh implementer session when one gets long or slow. Requires the chosen CLI installed and authenticated. |
 
-**Feature workflow:** `/spec` to turn a vague request into a spec, then `/codex-implement` (or `/cursor-implement`, `/opencode-implement`) to build it, then `/qa staged <the request>` to check it against the spec.
+**Feature workflow:** `/spec` to turn a vague request into a spec, then `/implement specs/<feature>.md` to build it, then `/qa staged <the request>` to check it against the spec.
 
 **Cleanup workflow:** `/simplify` (built-in - cleans up code) then `/verify` to confirm cleanup is safe, then `/code-review` (built-in) before committing. Add `/security-review` (built-in) when a change touches auth, user input, or data.
 
@@ -128,8 +134,9 @@ npm install -g ccusage
 | Hook                         | Event             | What it blocks                                                                                                                                                          |
 | ---------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **block-dangerous-commands** | PreToolUse (Bash) | sudo, doas, eval, rm on system/home dirs, git add/commit (user controls staging and commits), git force push/reset/clean/restore/rebase, DROP/TRUNCATE/DELETE, curl pipe to shell, npm publish, fork bombs, disk format ops |
-| **block-worktrees** | PreToolUse (Agent, EnterWorktree, Bash) | All git worktree creation — `EnterWorktree` tool, Agent `isolation: "worktree"`, and `git worktree add` (allows list/remove/prune). Pair with `worktree.bgIsolation: "none"` in settings to also stop automatic background-isolation worktrees. |
-| **notify-stop-sound** | Stop | Plays a sound when Claude finishes a turn, but only in the main chat — silent for background subagents (skips when the hook payload carries an `agent_id`). |
+| **block-worktrees** | PreToolUse (Agent, EnterWorktree, Bash) | All git worktree creation: `EnterWorktree` tool, Agent `isolation: "worktree"`, and `git worktree add` (allows list/remove/prune). Pair with `worktree.bgIsolation: "none"` in settings to also stop automatic background-isolation worktrees. |
+| **notify-stop-sound** | Stop | Plays a sound when Claude finishes a turn, but only in the main chat; silent for background subagents (skips when the hook payload carries an `agent_id`). |
+| **block-em-dashes** | PreToolUse (Write, Edit, MultiEdit, NotebookEdit, Bash, PowerShell) | Any em dash, en dash, or lookalike (figure dash, horizontal bar, two/three-em dash, small em dash, vertical dashes) or HTML entity that renders as one (named `mdash`/`ndash` entities or numeric ones like decimal 8212 and hex x2014) written into a file. Checks only the new text, so files with existing dashes can still be edited. Shell commands containing a dash are blocked unless every part is a read-only search (`grep`, `rg`, `find` without `-exec`, `git log/show/diff/grep`...) with no redirect, `tee`, heredoc, or other write. Tells Claude to use a comma, colon, semicolon, parentheses, a period, or a plain hyphen instead. Doesn't see files written by other tools (e.g. Codex/Cursor/opencode via `/implement`). |
 
 ### Status Line
 

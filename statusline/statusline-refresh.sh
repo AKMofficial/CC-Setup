@@ -6,11 +6,11 @@
 CACHE_FILE="$HOME/.claude/statusline-cache.json"
 LOCK_FILE="$HOME/.claude/statusline-refresh.lock"
 
-# Acquire lock — use flock if available (atomic), fall back to PID-based
+# Acquire lock: use flock if available (atomic), fall back to PID-based
 if command -v flock >/dev/null 2>&1; then
     exec 9>"$LOCK_FILE"
     flock -n 9 || exit 0
-    # flock: no cleanup needed — lock released when fd 9 closes on exit
+    # flock: no cleanup needed; lock released when fd 9 closes on exit
 else
     if [ -f "$LOCK_FILE" ]; then
         OLD_PID=$(<"$LOCK_FILE") 2>/dev/null || true

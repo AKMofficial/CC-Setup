@@ -4,7 +4,7 @@
 
 # ── Guard: ensure jq is available ──
 if ! command -v jq >/dev/null 2>&1; then
-    echo "jq not found — install with: brew install jq (macOS) or apt install jq (Linux)"
+    echo "jq not found; install with: brew install jq (macOS) or apt install jq (Linux)"
     exit 1
 fi
 
@@ -123,7 +123,7 @@ if [ -f "$CACHE_FILE" ]; then
         # Strip fractional seconds and Z (pure bash, zero forks)
         BLOCK_END_CLEAN="${BLOCK_END%%.*}"
         BLOCK_END_CLEAN="${BLOCK_END_CLEAN%Z}"
-        # Cross-platform date parsing (macOS + Linux/WSL) — single call
+        # Cross-platform date parsing (macOS + Linux/WSL): single call
         BLOCK_END_EPOCH=$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "$BLOCK_END_CLEAN" +%s 2>/dev/null) || \
         BLOCK_END_EPOCH=$(date -u -d "${BLOCK_END_CLEAN}" +%s 2>/dev/null)
 

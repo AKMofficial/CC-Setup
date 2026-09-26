@@ -114,7 +114,7 @@ if echo "$CMD" | grep -qE 'git\s+branch\s+.*-D\b'; then
   exit 2
 fi
 
-# Git checkout (discards uncommitted changes — only allow branch switching)
+# Git checkout (discards uncommitted changes; only allow branch switching)
 # Block: git checkout -- <file>, git checkout <file>, git checkout .
 # Allow: git checkout <branch>, git checkout -b <branch> (handled by not matching -b flag)
 if echo "$CMD" | grep -qE 'git\s+checkout\s+--\s+' || \
@@ -130,19 +130,19 @@ if echo "$CMD" | grep -qE 'git\s+restore\s+'; then
   exit 2
 fi
 
-# Git stash — all subcommands blocked (never touch working tree or stash)
+# Git stash: all subcommands blocked (never touch working tree or stash)
 if echo "$CMD" | grep -qE 'git\s+stash(\s|$)'; then
   echo "BLOCKED: git stash is fully disabled. Never move, stage, or lose changes via stash." >&2
   exit 2
 fi
 
-# Git add — staging files blocked (user controls what gets staged)
+# Git add: staging files blocked (user controls what gets staged)
 if echo "$CMD" | grep -qE 'git\s+add(\s|$)'; then
   echo "BLOCKED: git add is disabled. User controls staging." >&2
   exit 2
 fi
 
-# Git commit — committing is blocked (user controls commits). Also catches
+# Git commit: committing is blocked (user controls commits). Also catches
 # `git -C <dir> commit` and flag variants so it can't be dodged from another
 # working directory.
 if echo "$CMD" | grep -qE 'git\s+((-C\s+\S+|--?[A-Za-z-]+(=\S+)?)\s+)*commit(\s|$)'; then
@@ -150,7 +150,7 @@ if echo "$CMD" | grep -qE 'git\s+((-C\s+\S+|--?[A-Za-z-]+(=\S+)?)\s+)*commit(\s|
   exit 2
 fi
 
-# Git reset/restore --staged — unstaging files blocked
+# Git reset/restore --staged: unstaging files blocked
 if echo "$CMD" | grep -qE 'git\s+reset(\s|$)' || \
    echo "$CMD" | grep -qE 'git\s+restore\s+--staged'; then
   echo "BLOCKED: Unstaging files is disabled. User controls staging." >&2

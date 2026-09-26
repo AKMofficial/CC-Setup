@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Play a sound when Claude finishes a turn — but ONLY in the main chat session,
+# Play a sound when Claude finishes a turn, but ONLY in the main chat session,
 # not when a background subagent / Agent-tool task completes.
 #
 # Fires as a Stop hook. Hooks that fire inside a subagent get `agent_id` /
