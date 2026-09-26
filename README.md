@@ -110,7 +110,7 @@ npm install -g ccusage
 
 | Skill      | Command   | What it does                                                                          |
 | ---------- | --------- | ------------------------------------------------------------------------------------- |
-| **commit** | `/commit` | Reads staged changes, writes a conventional commit message to `COMMIT_MESSAGE.md`     |
+| **commit** | `/commit` | Reads staged changes, writes a changelog-style commit message (sized to the change) to `COMMIT_MESSAGE.md` |
 | **review** | `/review` | Full code review on uncommitted changes - bugs, security, types, logic, performance   |
 | **verify** | `/verify` | Reviews unstaged changes - reports if they're safe, worth staging, or break something |
 | **cursor-implement** | `/cursor-implement <what to build>` | Delegates coding to Cursor's headless agent (`cursor-agent`, `composer-2.5-fast`) while Claude writes the spec, reviews the diff, and loops until every gate is green. Requires `cursor-agent` installed and authenticated. |
