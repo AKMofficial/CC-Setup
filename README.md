@@ -8,12 +8,13 @@ My Claude Code setup - skills, hooks, status line, and settings config. Copy to 
 
 ```bash
 # Skills
-mkdir -p ~/.claude/skills/commit ~/.claude/skills/verify ~/.claude/skills/qa ~/.claude/skills/spec ~/.claude/skills/implement
+mkdir -p ~/.claude/skills/commit ~/.claude/skills/verify ~/.claude/skills/qa ~/.claude/skills/spec ~/.claude/skills/implement ~/.claude/skills/explain
 cp skills/commit/SKILL.md ~/.claude/skills/commit/SKILL.md
 cp skills/verify/SKILL.md ~/.claude/skills/verify/SKILL.md
 cp skills/qa/SKILL.md ~/.claude/skills/qa/SKILL.md
 cp skills/spec/SKILL.md ~/.claude/skills/spec/SKILL.md
 cp skills/implement/SKILL.md ~/.claude/skills/implement/SKILL.md
+cp skills/explain/SKILL.md ~/.claude/skills/explain/SKILL.md
 
 # Hooks
 mkdir -p ~/.claude/hooks
@@ -121,6 +122,7 @@ npm install -g ccusage
 | ---------- | --------- | ------------------------------------------------------------------------------------- |
 | **commit** | `/commit` | Reads staged changes, writes a changelog-style commit message (sized to the change) to `COMMIT_MESSAGE.md` |
 | **verify** | `/verify` | Reviews unstaged changes - reports if they're safe, worth staging, or break something |
+| **explain** | `/explain [staged\|unstaged\|all\|<commit>\|<base>..<head>\|#PR] [engineer\|simple] [brief] [focus]` | Explains a change so you understand all of it: TL;DR, a before/after table, then each logical change walked through with a concrete scenario (real toy data run through the old and new code), the key code snippets, ripple effects, and easy-to-miss removals/defaults/config. Two modes: `engineer` (default) and `simple`, which rewrites it as plain-language user stories for a non-technical reader. `brief` keeps just the TL;DR and table. Read-only. |
 | **qa** | `/qa [staged\|unstaged] <the feature request>` | Feature review of changes (e.g. written by another AI agent) against what was asked - checks every requirement is done, finds bugs and missed places, checks it matches the project's style/UI and is light and fast, researches known pitfalls on the web, and lists unrelated changes in the diff neutrally |
 | **spec** | `/spec <the rough idea>` | Turns a vague feature request into a full spec: researches the codebase and the web, asks only the real product decisions in batches of up to 4, then writes `specs/<feature>.md` with flows, every affected place, edge cases, approach, open stakeholder questions, and acceptance criteria |
 | **implement** | `/implement [codex\|cursor\|opencode][:model] <what to build>` | Delegates coding to another AI CLI (Codex, Cursor, or opencode) while Claude writes the spec, reviews the diff, and loops until every gate is green. Default tool and per-tool models are set in the skill's Config block; pick another per run with e.g. `/implement cursor ...` or `/implement codex:gpt-5.5 ...`. Starts a fresh implementer session when one gets long or slow. Requires the chosen CLI installed and authenticated. |
@@ -164,3 +166,4 @@ Custom status bar displayed below the input box. Shows at a glance:
 ## Credits
 
 - `/spec` borrows ideas (no code or text) from Matt Pocock's [grill-me](https://skillselion.com/skills/mattpocock/skills/grill-me) skill and GitHub [spec-kit](https://github.com/github/spec-kit)'s `/clarify` command
+- `/explain` borrows ideas (no code or text) from Chris Graffagnino's [explain-diff](https://github.com/Chris-Graffagnino/explain-diff) skill (audience modes, removed-behavior audit, stated vs inferred intent, no invented sections), Geoffrey Litt's [explain-diff](https://gist.github.com/geoffreylitt/a29df1b5f9865506e8952488eac3d524) prompt (toy-data examples, flow-ordered walkthrough), and prlens' [PR explanation guide](https://prlens.dev/guides/explain-a-pull-request-without-the-diff) (the "what does the system do now" TL;DR)
