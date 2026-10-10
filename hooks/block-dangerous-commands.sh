@@ -179,7 +179,7 @@ tokenize() {
 # Commands a wrapper may run that this hook cares about. After a wrapper, its
 # own flags/args vary, so the head is the first later token naming one of these
 # (`timeout -s KILL 5 rm ...`, `nice -n 10 sudo ...`).
-WRAP_TARGETS="$UNIX_DEL|$SHELLS|find|xargs|cd|pushd|popd|sudo|doas|cp|mv|ditto|install|rsync|openrsync|tee|truncate|mkfile|dd|sed|gsed|tar|unzip"
+WRAP_TARGETS="$UNIX_DEL|$SHELLS|find|xargs|cd|pushd|popd|sudo|doas|cp|mv|ditto|install|rsync|openrsync|tee|truncate|mkfile|dd|sed|gsed|tar|unzip|git|gh"
 
 # find_head: tokenize $1 into TOKS and set HEAD (bare lowercase command name)
 # and HEAD_I (its index), skipping VAR=value, shell keywords and wrappers.
@@ -232,11 +232,216 @@ check_redirects() {
   return 0
 }
 
+# ---------------------------------------------------------------------------
+# Git writes and GitHub PR actions.
+# git add / commit / push are allowed only while a non-protected branch is
+# checked out, read from the real repo (not the command text). Pushes may only
+# land on non-protected branches. gh may open and read PRs, never merge,
+# approve, review, close, reopen, edit or comment on them.
+# ---------------------------------------------------------------------------
+# Branches Claude may never stage on, commit to or push to. The remote default
+# branch (origin/HEAD) is always added as well.
+PROTECTED_BRANCHES='main|master|production|prod|release|staging|develop'
+
+GIT_CWD="${CWD:-$PWD}"
+GIT_CTX_CHANGED=0   # a cd / checkout / switch ran earlier in this command
+PROTECTED_RE=""
+
+git_q() { git -C "$GIT_CWD" "$@" 2>/dev/null; }
+
+is_protected() {
+  if [ -z "$PROTECTED_RE" ]; then
+    local def
+    def=$(git_q symbolic-ref --quiet --short refs/remotes/origin/HEAD) || def=""
+    def="${def#origin/}"
+    PROTECTED_RE="^($PROTECTED_BRANCHES${def:+|$def})$"
+  fi
+  [[ "$1" =~ $PROTECTED_RE ]]
+}
+
+# Subcommands that move HEAD or the repo, so a later write would land on a
+# branch this hook did not check.
+GIT_MOVES='checkout|switch|symbolic-ref|worktree|branch|update-ref|rebase|init'
+
+# check_git: TOKS / HEAD_I point at a `git` command.
+check_git() {
+  local n=${#TOKS[@]} j=$((HEAD_I+1)) t sub cur
+  unquote "${TOKS[$j]:-}"; sub="$UQ"
+  case "$sub" in
+    -*)
+      # Global options (-C, -c, --git-dir, --work-tree...) can point git at
+      # another repo or alias a verb, so writes behind them are not allowed.
+      while [ $j -lt "$n" ]; do
+        unquote "${TOKS[$j]}"; j=$((j+1))
+        [[ "$UQ" =~ ^(add|commit|push)$ ]] && block "git global options before $UQ (-C, -c, --git-dir...). Run plain git $UQ from the repo dir."
+        [[ "$UQ" =~ ^($GIT_MOVES)$ ]] && GIT_CTX_CHANGED=1
+      done
+      return 0 ;;
+    add|commit|push) ;;
+    *) [[ "$sub" =~ ^($GIT_MOVES)$ ]] && GIT_CTX_CHANGED=1; return 0 ;;
+  esac
+
+  [ "$GIT_CTX_CHANGED" = 1 ] && block "git $sub after a cd/checkout/switch in the same command: the branch it lands on cannot be checked. Run git $sub as its own command."
+  case "$NORM" in *GIT_DIR*|*GIT_WORK_TREE*|*GIT_INDEX_FILE*|*GIT_NAMESPACE*|*GIT_CONFIG*)
+    block "git $sub with a GIT_* environment override." ;;
+  esac
+  cur=$(git_q symbolic-ref --quiet --short HEAD) || cur=""
+  [ -z "$cur" ] && block "git $sub: could not read the current branch (detached HEAD or not a repo)."
+  # Pushes are judged by where they land (check_git_push), not by HEAD.
+  [ "$sub" != push ] && is_protected "$cur" \
+    && block "git $sub on protected branch '$cur'. Create a feature branch first (git checkout -b <name>)."
+
+  j=$((j+1))
+  case "$sub" in
+    commit)
+      while [ $j -lt "$n" ]; do
+        t="${TOKS[$j]}"; j=$((j+1))
+        case "$t" in
+          --amend|--amend=*) block "git commit --amend rewrites an existing commit." ;;
+          --no-verify) block "git commit --no-verify skips the repo hooks." ;;
+        esac
+        [[ "$t" =~ ^-[a-zA-Z]*n[a-zA-Z]*$ ]] && block "git commit -n skips the repo hooks."
+      done ;;
+    push)
+      check_git_push "$cur" ;;
+  esac
+  return 0
+}
+
+# check_git_push: TOKS from index j are the push arguments. $1 = current branch.
+check_git_push() {
+  local cur="$1" t pos=() remote spec src dst
+  while [ $j -lt "$n" ]; do
+    unquote "${TOKS[$j]}"; t="$UQ"; j=$((j+1))
+    case "$t" in
+      -u|--set-upstream|-v|--verbose|-q|--quiet|--progress|--no-progress|-n|--dry-run|--porcelain|--atomic) ;;
+      --force-with-lease|--force-with-lease=*|--force-if-includes) ;;
+      -*) block "git push option '$t' is not allowed (allowed: -u, -v, -q, -n, --dry-run, --force-with-lease)." ;;
+      *[\`\$\"\'\*\?\\]*) block "git push argument '$t' has a quote, variable or glob. Name the remote and branch plainly." ;;
+      *) pos+=("$t") ;;
+    esac
+  done
+
+  remote="${pos[0]:-}"
+  if [ -n "$remote" ]; then
+    grep -qxF -- "$remote" <<< "$(git_q remote)" \
+      || block "git push to '$remote', which is not a configured remote."
+  fi
+
+  if [ ${#pos[@]} -le 1 ]; then
+    # No refspec: git pushes the current branch to its push target.
+    [ "$(git_q config push.default)" = matching ] \
+      && block "git push with push.default=matching pushes every branch. Use git push origin <branch>."
+    dst=$(git_q for-each-ref --format='%(push:remoteref)' "refs/heads/$cur") || dst=""
+    dst="${dst#refs/heads/}"
+    is_protected "${dst:-$cur}" && block "git push from '$cur' goes to protected branch '${dst:-$cur}'."
+    return 0
+  fi
+
+  for spec in "${pos[@]:1}"; do
+    case "$spec" in
+      *:*) src="${spec%%:*}"; dst="${spec#*:}" ;;
+      *)   src="$spec"; dst="$spec"
+           [ "$src" = HEAD ] && dst="$cur"
+           [ "$src" = HEAD ] || git_q show-ref --verify --quiet "refs/heads/$src" \
+             || block "git push '$src' is not a local branch (tags and other refs are not allowed)." ;;
+    esac
+    [ -z "$src" ] && block "git push :$dst deletes a remote branch."
+    case "$dst" in
+      refs/heads/*) dst="${dst#refs/heads/}" ;;
+      refs/*|HEAD|"") block "git push to '$dst' (only named branches are allowed)." ;;
+    esac
+    is_protected "$dst" && block "git push to protected branch '$dst'. Push a feature branch and open a PR instead."
+  done
+  return 0
+}
+
+GH_BUILTINS='agent-task|alias|api|attestation|auth|browse|cache|codespace|completion|config|copilot|extension|gist|gpg-key|help|issue|label|org|pr|preview|project|release|repo|ruleset|run|search|secret|ssh-key|status|variable|version|workflow'
+
+# check_gh: TOKS / HEAD_I point at a `gh` command.
+check_gh() {
+  local n=${#TOKS[@]} j=$((HEAD_I+1)) args=() top sub="" k a
+  while [ $j -lt "$n" ]; do unquote "${TOKS[$j]}"; args+=("$UQ"); j=$((j+1)); done
+  top="${args[0]:-}"
+  case "$top" in ""|-*) return 0 ;; esac
+  [[ "$top" =~ ^($GH_BUILTINS)$ ]] \
+    || block "gh $top is not a built-in gh command (an alias or extension can run anything, including a merge)."
+  # Subcommand: first non-flag after the command; only -R/--repo may come first.
+  k=1
+  while [ $k -lt ${#args[@]} ]; do
+    case "${args[$k]}" in
+      -R|--repo) k=$((k+2)) ;;
+      --repo=*) k=$((k+1)) ;;
+      -*) [ "$top" = api ] && break
+          block "gh $top with a flag before the subcommand ('${args[$k]}')." ;;
+      *) sub="${args[$k]}"; break ;;
+    esac
+  done
+
+  case "$top" in
+    pr)
+      case "$sub" in
+        ""|create|view|list|status|diff|checks) ;;
+        checkout) GIT_CTX_CHANGED=1 ;;
+        edit)
+          # Title, body, labels, reviewers are fine; the target branch is not.
+          for a in "${args[@]}"; do
+            case "$a" in -B|--base|--base=*|-B?*)
+              block "gh pr edit --base changes which branch the PR merges into. Do that yourself." ;;
+            esac
+          done ;;
+        *) block "gh pr $sub is for you to do. Claude may open, read and edit PRs, not merge, approve, review, close, reopen or comment." ;;
+      esac ;;
+    api) check_gh_api ;;
+    extension) [[ "$sub" =~ ^(install|upgrade|exec|create)$ ]] && block "gh extension $sub runs third-party code." ;;
+    repo) [[ "$sub" =~ ^(delete|edit|rename|archive|unarchive|sync)$ ]] && block "gh repo $sub changes or deletes the repo." ;;
+    release) [[ "$sub" =~ ^(create|delete|delete-asset|edit|upload)$ ]] && block "gh release $sub publishes or deletes a release." ;;
+    workflow) [[ "$sub" =~ ^(run|enable|disable)$ ]] && block "gh workflow $sub." ;;
+    run) [[ "$sub" =~ ^(cancel|rerun|delete)$ ]] && block "gh run $sub." ;;
+    secret|variable) [[ "$sub" =~ ^(set|delete|remove)$ ]] && block "gh $top $sub." ;;
+    issue) [[ "$sub" =~ ^(close|delete|transfer|lock)$ ]] && block "gh issue $sub." ;;
+    auth) [[ "$sub" =~ ^(logout|token|refresh|switch|setup-git)$ ]] && block "gh auth $sub touches your GitHub login." ;;
+  esac
+  return 0
+}
+
+# gh api is allowed read-only: GET without fields, or a GraphQL query with no
+# mutation. Anything else can merge, approve or close through the raw API.
+check_gh_api() {
+  local k=1 a method="" fields=0 graphql=0
+  while [ $k -lt ${#args[@]} ]; do
+    a="${args[$k]}"; k=$((k+1))
+    case "$a" in
+      -X|--method) method="${args[$k]:-}"; k=$((k+1)) ;;
+      -X*) method="${a#-X}" ;;
+      --method=*) method="${a#--method=}" ;;
+      -f|-F|--field|--raw-field|-f?*|-F?*|--field=*|--raw-field=*) fields=1 ;;
+      --input|--input=*) block "gh api --input sends a request body from a file." ;;
+      graphql) graphql=1 ;;
+    esac
+  done
+  method=$(printf '%s' "$method" | tr 'a-z' 'A-Z')
+  if [ $graphql = 1 ]; then
+    grep -qi 'mutation' <<< "$NORM" && block "gh api graphql mutation."
+    case "$NORM" in *=@*) block "gh api graphql with a query read from a file." ;; esac
+    return 0
+  fi
+  [ -n "$method" ] && [ "$method" != GET ] && block "gh api $method is a write. Only GET is allowed."
+  [ $fields = 1 ] && [ "$method" != GET ] && block "gh api with fields sends a POST. Only reads are allowed."
+  return 0
+}
+
 # Check one command segment (already split on separators). $1 = segment.
 check_segment() {
   local seg="$1" IFS=' ' t k j n i r
   case "$seg" in *'>'*) check_redirects "$seg" ;; esac   # skip grep+sed on lines with no redirect
   find_head "$seg"
+  # A git/gh write behind a runner that takes a command as arguments cannot be
+  # checked against the current branch.
+  case "$HEAD" in ""|xargs|find|fd|parallel)
+    [[ "$seg" =~ (^|[^[:alnum:]_.-])(git[[:space:]]+(add|commit|push)|gh[[:space:]]+(pr|api))([^[:alnum:]_-]|$) ]] \
+      && block "git/gh write run through ${HEAD:-a wrapper}. Run it as a plain git or gh command." ;;
+  esac
   [ -z "$HEAD" ] && return 0
   i=$HEAD_I; n=${#TOKS[@]}
   local rest="${TOKS[*]:$((i+1))}"
@@ -265,7 +470,14 @@ check_segment() {
     sudo|doas)
       block "sudo/doas should not be used." ;;
 
+    git) check_git ;;
+    gh)  check_gh ;;
+
+    set-location|sl|chdir|push-location|pop-location)
+      GIT_CTX_CHANGED=1 ;;
+
     cd|pushd)
+      GIT_CTX_CHANGED=1
       # Track where relative paths now point. Unverifiable destinations (bare
       # cd = home, cd -, ~, $VAR, .., outside project/temp) make them unsafe.
       local dest="$rest"
@@ -277,7 +489,7 @@ check_segment() {
       esac ;;
 
     popd)
-      REL_OK=0 ;;
+      GIT_CTX_CHANGED=1; REL_OK=0 ;;
 
     bash|sh|zsh|dash|ksh|fish)
       # `bash -c '<cmd>'`: check the inner command like any other segment.
@@ -548,9 +760,22 @@ m 'git\s+checkout\b[^|;&]*(--\s+\S|\s\.|\s[^- ]\S*\.[a-z]+)' && block "git check
 m 'git\s+(restore|switch)\b[^|;&]*(--discard-changes|--staged|--\s|-f\b)' && block "git restore/switch discards changes."
 m 'git\s+restore\b'                                     && block "git restore discards uncommitted changes."
 m 'git\s+stash\b'                                       && block "git stash is disabled (never move/lose working-tree changes)."
-m 'git\s+add\b'                                         && block "git add is disabled (user controls staging)."
-m 'git\s+((-C\s+\S+|--?[A-Za-z-]+(=\S+)?)\s+)*commit($| )' && block "git commit is disabled (user controls commits)."
+# git add / commit / push are checked per segment against the real branch
+# (check_git). Backstop on the text in case a push was not parsed. Anchored to
+# command position so prose like a PR body saying "git push to main" passes.
+m "(^|[;&|(\`\"'])[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+|(env|command|exec|nohup|time|nice|caffeinate)[[:space:]]+)*git[[:space:]]+push\\b[^|;&]*[[:space:]:](refs/heads/)?($PROTECTED_BRANCHES)([[:space:]]|\$)" \
+  && block "git push naming a protected branch."
 m 'git\s+branch\b[^|;&]*-D\b'                           && block "git branch -D force-deletes without a merge check."
+# Any force flag on git branch: --delete --force / -df (force delete), -f (reset
+# an existing branch to another commit), -M / -C (move/copy over an existing one).
+m 'git\s+branch\b[^|;&]*\s(-[a-zA-Z]*[DfMC][a-zA-Z]*|--force)\b' \
+  && block "git branch with a force flag deletes or overwrites a branch."
+# checkout -B / switch -C silently reset an existing branch; checkout -f / switch
+# --force throw away uncommitted changes.
+m 'git\s+checkout\b[^|;&]*\s(-[a-zA-Z]*[Bf][a-zA-Z]*|--force)\b' \
+  && block "git checkout -B/-f overwrites an existing branch or discards changes."
+m 'git\s+switch\b[^|;&]*\s(-[a-zA-Z]*C[a-zA-Z]*|--force-create|--force)\b' \
+  && block "git switch -C/--force overwrites an existing branch or discards changes."
 m 'git\s+worktree\s+remove\b[^|;&]*(--force|-f)\b'      && block "git worktree remove --force."
 m 'git\s+reflog\b[^|;&]*expire\b'                       && block "git reflog expire destroys recovery history."
 m 'git\s+(gc\b[^|;&]*--prune=now|prune\b)'              && block "git gc --prune/prune drops unreachable objects."
@@ -597,6 +822,10 @@ mi '\bgsutil\b[^|;&]*(rm\b[^|;&]*-r|\brsync\b[^|;&]*-d)'  && block "gsutil rm -r
 mi '\bgcloud\b[^|;&]*(storage\s+rm\b[^|;&]*(-r|--recursive)|\bdelete\b)' && block "gcloud delete / storage rm -r."
 mi '\baz\b[^|;&]*(group\s+delete|storage\s+blob\s+delete-batch|\bdelete\b[^|;&]*--yes)' && block "az group/resource delete."
 mi '\bgh\b[^|;&]*(repo\s+delete|release\s+delete)\b'     && block "gh repo/release delete."
+# Raw GitHub API writes (merge, approve, close...) that skip the gh checks.
+m 'curl\b[^|;&]*api\.github\.com' \
+  && m 'curl\b[^|;&]*(-X\s*(POST|PUT|PATCH|DELETE)|--request\s*(POST|PUT|PATCH|DELETE)|\s-d\b|--data|--json|\s-F\b|--form)' \
+  && block "curl write to the GitHub API."
 mi 'npm\b[^|;&]*unpublish\b'                            && block "npm unpublish."
 m '(npm|yarn|pnpm)\s+publish\b' && ! m '[-]-dry-run'   && block "package publishing."
 

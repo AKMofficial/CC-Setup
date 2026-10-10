@@ -1,7 +1,7 @@
 ---
 name: explain
-description: Explain staged, unstaged, or committed changes so you understand all of them - every change as its own self-contained block with the exact trigger, a concrete before vs after, and real numbers, grouped by area. For a SWE by default, or plain language for a non-technical reader. Add --worth for a keep-or-drop verdict on every change
-argument-hint: "[staged|unstaged|all|<commit>|<base>..<head>|#<PR>] [engineer (default)|simple] [--worth] [brief] [extra focus or context]"
+description: Explain a diff change by change, each with a real before and after
+argument-hint: "[staged|unstaged|all|<sha>|<a>..<b>|#PR] [simple] [--worth] [brief] [focus]"
 user-invocable: true
 disable-model-invocation: true
 ---
