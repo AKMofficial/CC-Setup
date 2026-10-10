@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Claude Code Custom Status Line
-# Renders: ◆ Model │ Used/Max ▐████░░░░▌ XX% │ ⏱ Xh Xm
+# Renders: ◆ Model ⚡ (effort) │ Used/Max ▐████░░░░▌ XX% (cache 4m) │ 5h XX% ↻ 2h14m │ 7d XX% ↻ 3d4h
 
 # ── Guard: ensure jq is available ──
 if ! command -v jq >/dev/null 2>&1; then
@@ -22,9 +22,9 @@ fi
 export LC_CTYPE="${LC_CTYPE:-$UTF8_LOCALE}"
 
 # ── Config ──
-CACHE_FILE="$HOME/.claude/statusline-cache.json"
-REFRESH_SCRIPT="$HOME/.claude/statusline-refresh.sh"
-CACHE_TTL=300  # 5 minutes
+# Plan limits shared by all sessions: each session only gets fresh rate_limits
+# on its own API responses, so idle sessions would otherwise show stale usage
+LIMITS_FILE="$HOME/.claude/statusline-limits.json"
 
 # ── ANSI Colors ──
 RESET='\033[0m'
@@ -37,18 +37,68 @@ RED='\033[31m'
 WHITE='\033[37m'
 GRAY='\033[90m'
 
-# ── Read stdin JSON ──
+# ── Read stdin JSON + shared limits ──
 INPUT=$(cat)
+SHARED=""
+[ -f "$LIMITS_FILE" ] && SHARED=$(<"$LIMITS_FILE")
 
 # Single jq call to extract all needed fields (tab-separated)
-# Clean model name in jq: strip everything from " (" onward
-IFS=$'\t' read -r MODEL_NAME CTX_SIZE CTX_PCT <<< "$(echo "$INPUT" | jq -r '[
-  ((.model.display_name // "Unknown") | split(" (")[0]),
-  (.context_window.context_window_size // 200000),
-  (.context_window.used_percentage // 0)
-] | @tsv')"
+# - Model name: strip everything from " (" onward
+# - Effort: absent when the model doesn't support the effort parameter
+# - Cache: seconds until the prompt cache goes cold, "cold", or "-" when
+#   unknown (before the first response, or caching not reported)
+# - Context tokens: same input-only formula Claude Code uses for used_percentage
+# - Limits: merge this session's rate_limits with the shared file, keeping the
+#   freshest reading per window. Within one window usage only grows, and a new
+#   window resets at least 5h (or 7d) after the old one, so a later resets_at
+#   (by over an hour) means a newer window; otherwise the higher usage is newer.
+#   Windows past their reset are dropped.
+# - Absent values become "-": bash `read` collapses consecutive tabs, so an
+#   empty field would shift every value after it
+IFS=$'\t' read -r MODEL_NAME FAST EFFORT CTX_SIZE CTX_PCT CTX_TOKENS CACHE_SECS FIVE_PCT FIVE_SECS WEEK_PCT WEEK_SECS LIMITS_CHANGED LIMITS_JSON <<< "$(
+  echo "$INPUT" | jq -r --arg shared "$SHARED" '
+    def live: if (.used_percentage | type) == "number" and (.resets_at | type) == "number" and .resets_at > now
+              then {used_percentage, resets_at} else null end;
+    def fresher($a; $b):
+      if $a == null then $b elif $b == null then $a
+      elif $a.resets_at - $b.resets_at > 3600 then $a
+      elif $b.resets_at - $a.resets_at > 3600 then $b
+      elif $a.used_percentage >= $b.used_percentage then $a else $b end;
+    def show: if . == null then "-", "-" else (.used_percentage | round), (.resets_at - now | floor) end;
 
-# ── Format context window size (fully dynamic) ──
+    (try ($shared | fromjson) catch null) as $old
+    | {
+        five_hour: fresher(.rate_limits.five_hour | live; $old.five_hour | live),
+        seven_day: fresher(.rate_limits.seven_day | live; $old.seven_day | live)
+      } as $limits
+    | .context_window.current_usage as $u
+    | .prompt_cache as $c
+    | [
+        ((.model.display_name // "Unknown") | split(" (")[0]),
+        (if .fast_mode == true then "on" else "-" end),
+        (.effort.level // "-"),
+        (.context_window.context_window_size // 200000),
+        (.context_window.used_percentage // 0),
+        (if $u then ($u.input_tokens // 0) + ($u.cache_creation_input_tokens // 0) + ($u.cache_read_input_tokens // 0) else "-" end),
+        (if $c.caching_observed != true then "-"
+         elif $c.warm == true and ($c.expires_at | type) == "number" and $c.expires_at > now then ($c.expires_at - now | floor)
+         else "cold" end),
+        ($limits.five_hour | show),
+        ($limits.seven_day | show),
+        ($limits != ($old // {} | {five_hour: (.five_hour | live), seven_day: (.seven_day | live)})),
+        ($limits | tojson)
+      ] | @tsv'
+)"
+
+# Write shared limits only when this session saw something newer
+# Atomic (temp file + mv) so concurrent sessions never read a partial file
+if [ "$LIMITS_CHANGED" = "true" ]; then
+    printf '%s\n' "$LIMITS_JSON" > "$LIMITS_FILE.$$" && mv -f "$LIMITS_FILE.$$" "$LIMITS_FILE"
+fi
+
+# ── Helpers ──
+
+# Format token counts (fully dynamic)
 format_size() {
     local size=$1
     if [ "$size" -ge 1000000 ] 2>/dev/null; then
@@ -60,32 +110,85 @@ format_size() {
     fi
 }
 
+# usage_color <pct>: sets COLOR: green (<50%), yellow (50-79%), red (80%+)
+usage_color() {
+    if [ "$1" -lt 50 ]; then
+        COLOR="$GREEN"
+    elif [ "$1" -lt 80 ]; then
+        COLOR="$YELLOW"
+    else
+        COLOR="$RED"
+    fi
+}
+
+# format_duration <seconds>: sets DURATION to a compact countdown (3d4h, 2h14m, 9m, <1m)
+format_duration() {
+    local s=$1
+    local d=$((s / 86400)) h=$((s % 86400 / 3600)) m=$((s % 3600 / 60))
+    if [ "$d" -gt 0 ]; then
+        DURATION="${d}d${h}h"
+    elif [ "$h" -gt 0 ]; then
+        DURATION="${h}h${m}m"
+    elif [ "$m" -gt 0 ]; then
+        DURATION="${m}m"
+    else
+        DURATION="<1m"
+    fi
+}
+
+# ── Pieces ──
+# The line is built from pieces, each with a drop priority. When it doesn't fit
+# the window ($COLUMNS, set by Claude Code), pieces are dropped lowest
+# priority first instead of the end of the line getting cut off:
+#   1 context bar, 2 7d countdown, 3 5h countdown, 4 context tokens,
+#   5 cache, 6 effort; 0 = always kept
+PIECES=()
+PIECE_PRIOS=()
+PIECE_WIDTHS=()
+ESC_SEQ='\033['
+
+# add_piece <prio> <text> [extra_width]: extra_width covers double-width glyphs
+add_piece() {
+    local rest=$2 plain=""
+    # Visible width: strip "\033[...m" color codes (literal until printf %b)
+    while [[ "$rest" == *"$ESC_SEQ"* ]]; do
+        plain+="${rest%%"$ESC_SEQ"*}"
+        rest="${rest#*"$ESC_SEQ"}"
+        rest="${rest#*m}"
+    done
+    plain+="$rest"
+    PIECES+=("$2")
+    PIECE_PRIOS+=("$1")
+    PIECE_WIDTHS+=($(( ${#plain} + ${3:-0} )))
+}
+
+SEP=" ${DIM}│${RESET} "
+
+# ── Model + fast mode + effort ──
+add_piece 0 "${DIM_CYAN}◆ ${MODEL_NAME}${RESET}"
+[ "$FAST" = "on" ] && add_piece 0 " ⚡" 1
+[ "$EFFORT" != "-" ] && add_piece 6 "${DIM_CYAN} (${EFFORT})${RESET}"
+
+# ── Context window ──
 CTX_MAX_LABEL=$(format_size "$CTX_SIZE")
 
 # Truncate percentage to integer (pure bash, zero forks)
 PCT_INT=${CTX_PCT%%.*}
 PCT_INT=${PCT_INT:-0}
 
-# Calculate current usage in tokens from percentage
-CTX_USED=$((CTX_SIZE * PCT_INT / 100))
-CTX_USED_LABEL=$(format_size "$CTX_USED")
-
-CTX_LABEL="${CTX_USED_LABEL}/${CTX_MAX_LABEL}"
-
-# ── Build progress bar ──
+# Exact token count when available (null before the first response and right
+# after /compact), else estimate from the percentage
+if [ "$CTX_TOKENS" = "-" ]; then
+    CTX_TOKENS=$((CTX_SIZE * PCT_INT / 100))
+fi
+CTX_LABEL="$(format_size "$CTX_TOKENS")/${CTX_MAX_LABEL}"
 
 # Clamp to 0-100
 [ "$PCT_INT" -lt 0 ] 2>/dev/null && PCT_INT=0
 [ "$PCT_INT" -gt 100 ] 2>/dev/null && PCT_INT=100
 
-# Select color based on usage
-if [ "$PCT_INT" -lt 50 ]; then
-    BAR_COLOR="$GREEN"
-elif [ "$PCT_INT" -lt 80 ]; then
-    BAR_COLOR="$YELLOW"
-else
-    BAR_COLOR="$RED"
-fi
+usage_color "$PCT_INT"
+BAR_COLOR="$COLOR"
 
 # Build bar (20 chars wide)
 BAR_WIDTH=20
@@ -98,83 +201,65 @@ NONE="░░░░░░░░░░░░░░░░░░░░"
 FILLED_STR="${FULL:0:FILLED}"
 EMPTY_STR="${NONE:0:EMPTY}"
 
-BAR="${BAR_COLOR}▐${FILLED_STR}${GRAY}${EMPTY_STR}${BAR_COLOR}▌${RESET}"
-PCT_DISPLAY="${BAR_COLOR}${PCT_INT}%${RESET}"
+add_piece 0 "$SEP"
+add_piece 4 "${WHITE}${CTX_LABEL}${RESET} "
+add_piece 1 "${BAR_COLOR}▐${FILLED_STR}${GRAY}${EMPTY_STR}${BAR_COLOR}▌${RESET} "
+add_piece 0 "${BAR_COLOR}${PCT_INT}%${RESET}"
 
-# ── Read billing cache ──
-NOW=$(date +%s)
-TIMER_DISPLAY=""
-if [ -f "$CACHE_FILE" ]; then
-    CACHE_DATA=$(<"$CACHE_FILE")
-    IFS=$'\t' read -r CACHED_AT CACHE_ERROR BLOCK_END IS_ACTIVE <<< "$(echo "$CACHE_DATA" | jq -r '[
-      (.cached_at // 0),
-      (.error // false),
-      (.block_end_time // ""),
-      (.is_active // false)
-    ] | @tsv')"
+# ── Prompt cache (inside the context group) ──
+# Countdown until the cache expires; once cold, the next message re-processes
+# the whole conversation (slower, and uses more of the plan limits)
+if [ "$CACHE_SECS" = "cold" ]; then
+    add_piece 5 " ${GRAY}(cache${RESET} ${YELLOW}cold${RESET}${GRAY})${RESET}"
+elif [ "$CACHE_SECS" != "-" ]; then
+    format_duration "$CACHE_SECS"
+    CACHE_COLOR="$GRAY"
+    [ "$CACHE_SECS" -lt 60 ] && CACHE_COLOR="$YELLOW"
+    add_piece 5 " ${GRAY}(cache${RESET} ${CACHE_COLOR}${DURATION}${RESET}${GRAY})${RESET}"
+fi
 
-    if [ "$CACHE_ERROR" = "true" ]; then
-        # ccusage likely missing or failed
-        if ! command -v ccusage >/dev/null 2>&1; then
-            TIMER_DISPLAY=" ${DIM}│${RESET} ${DIM}⏱ ccusage not found${RESET}"
-        fi
-    elif [ -n "$BLOCK_END" ] && [ "$IS_ACTIVE" = "true" ]; then
-        # Calculate remaining time live from endTime
-        # Strip fractional seconds and Z (pure bash, zero forks)
-        BLOCK_END_CLEAN="${BLOCK_END%%.*}"
-        BLOCK_END_CLEAN="${BLOCK_END_CLEAN%Z}"
-        # Cross-platform date parsing (macOS + Linux/WSL): single call
-        BLOCK_END_EPOCH=$(date -j -u -f "%Y-%m-%dT%H:%M:%S" "$BLOCK_END_CLEAN" +%s 2>/dev/null) || \
-        BLOCK_END_EPOCH=$(date -u -d "${BLOCK_END_CLEAN}" +%s 2>/dev/null)
+# ── Plan usage limits ──
+# add_limit <label> <pct> <secs_left> <countdown_prio>: adds "│ 5h 23% ↻ 2h14m"
+# Skipped when the window is unknown (API key login, or no response seen yet)
+# Usage is bold from 80% so it stands out when it matters
+add_limit() {
+    local label=$1 pct=$2 secs=$3
+    [ "$pct" = "-" ] && return
+    usage_color "$pct"
+    local weight=""
+    [ "$pct" -ge 80 ] && weight="$BOLD"
+    format_duration "$secs"
+    add_piece 0 "${SEP}${GRAY}${label}${RESET} ${weight}${COLOR}${pct}%${RESET}"
+    add_piece "$4" " ${GRAY}↻ ${DURATION}${RESET}"
+}
 
-        if [ -n "$BLOCK_END_EPOCH" ]; then
-            REMAINING_SECS=$((BLOCK_END_EPOCH - NOW))
+add_limit "5h" "$FIVE_PCT" "$FIVE_SECS" 3
+add_limit "7d" "$WEEK_PCT" "$WEEK_SECS" 2
 
-            if [ "$REMAINING_SECS" -gt 0 ]; then
-                REMAINING_HOURS=$((REMAINING_SECS / 3600))
-                REMAINING_MINS=$(((REMAINING_SECS % 3600) / 60))
+# ── Fit to window ──
+# Margin covers Claude Code's own indent around the status line
+WIDTH_MARGIN=4
+MAX_WIDTH=-1
+[[ "${COLUMNS:-}" =~ ^[0-9]+$ ]] && MAX_WIDTH=$((COLUMNS - WIDTH_MARGIN))
 
-                # Format time string
-                if [ "$REMAINING_HOURS" -gt 0 ]; then
-                    TIME_STR="${REMAINING_HOURS}h ${REMAINING_MINS}m"
-                else
-                    TIME_STR="${REMAINING_MINS}m"
-                fi
+TOTAL=0
+for w in "${PIECE_WIDTHS[@]}"; do TOTAL=$((TOTAL + w)); done
 
-                # Color based on urgency
-                if [ "$REMAINING_SECS" -gt 7200 ]; then
-                    TIMER_COLOR="$GREEN"
-                elif [ "$REMAINING_SECS" -gt 1800 ]; then
-                    TIMER_COLOR="$YELLOW"
-                else
-                    TIMER_COLOR="$RED"
-                fi
-
-                TIMER_DISPLAY=" ${DIM}│${RESET} ${TIMER_COLOR}⏱ ${TIME_STR}${RESET}"
-            else
-                TIMER_DISPLAY=" ${DIM}│${RESET} ${DIM}⏱ block ended${RESET}"
-            fi
-        fi
-    fi
-
-    # Check cache freshness, spawn background refresh if stale
-    # The refresh script handles its own locking internally
-    CACHE_AGE=$((NOW - CACHED_AT))
-    if [ "$CACHE_AGE" -gt "$CACHE_TTL" ]; then
-        bash "$REFRESH_SCRIPT" </dev/null >/dev/null 2>&1 &
-        disown 2>/dev/null
-    fi
-else
-    # No cache exists, show placeholder and trigger refresh
-    TIMER_DISPLAY=" ${DIM}│${RESET} ${DIM}⏱ ...${RESET}"
-    bash "$REFRESH_SCRIPT" </dev/null >/dev/null 2>&1 &
-    disown 2>/dev/null
+DROP_BELOW=1  # pieces with 0 < prio < DROP_BELOW are dropped
+if [ "$MAX_WIDTH" -ge 0 ]; then
+    while [ "$TOTAL" -gt "$MAX_WIDTH" ] && [ "$DROP_BELOW" -le 6 ]; do
+        for i in "${!PIECES[@]}"; do
+            [ "${PIECE_PRIOS[$i]}" -eq "$DROP_BELOW" ] && TOTAL=$((TOTAL - PIECE_WIDTHS[i]))
+        done
+        DROP_BELOW=$((DROP_BELOW + 1))
+    done
 fi
 
 # ── Render ──
-printf "${DIM_CYAN}◆ %s${RESET} ${DIM}│${RESET} ${WHITE}%s${RESET} %b %b%b\n" \
-    "$MODEL_NAME" \
-    "$CTX_LABEL" \
-    "$BAR" \
-    "$PCT_DISPLAY" \
-    "$TIMER_DISPLAY"
+LINE=""
+for i in "${!PIECES[@]}"; do
+    prio=${PIECE_PRIOS[$i]}
+    [ "$prio" -gt 0 ] && [ "$prio" -lt "$DROP_BELOW" ] && continue
+    LINE+="${PIECES[$i]}"
+done
+printf '%b\n' "$LINE"

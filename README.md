@@ -26,7 +26,6 @@ chmod +x ~/.claude/hooks/block-dangerous-commands.sh ~/.claude/hooks/block-workt
 
 # Status Line
 cp statusline/statusline.sh ~/.claude/statusline.sh
-cp statusline/statusline-refresh.sh ~/.claude/statusline-refresh.sh
 ```
 
 ### 2. Add to `~/.claude/settings.json`
@@ -86,7 +85,8 @@ Add hooks and status line config (merge with any existing settings):
 "statusLine": {
   "type": "command",
   "command": "bash $HOME/.claude/statusline.sh",
-  "padding": 0
+  "padding": 0,
+  "refreshInterval": 60
 }
 ```
 
@@ -106,8 +106,6 @@ brew install jq
 # WSL/Linux
 sudo apt install jq
 
-# ccusage (needed for block timer in status line)
-npm install -g ccusage
 ```
 
 ### 4. Restart Claude Code
@@ -145,20 +143,31 @@ npm install -g ccusage
 Custom status bar displayed below the input box. Shows at a glance:
 
 ```
-◆ Opus 4.6 │ 300K/1M ▐██████░░░░░░░░░░░░░░▌ 30% │ ⏱ 35m
+◆ Opus 5.5 ⚡ (high) │ 300K/1M ▐██████░░░░░░░░░░░░░░▌ 30% (cache 4m) │ 5h 23% ↻ 2h14m │ 7d 41% ↻ 3d4h
 ```
 
 | Section        | Source                 | Details                                                             |
 | -------------- | ---------------------- | ------------------------------------------------------------------- |
 | Model name     | Claude Code JSON stdin | Dynamic - adapts to any model (Opus, Sonnet, Haiku, etc.)           |
-| Context window | Claude Code JSON stdin | Shows used/max (e.g. 300K/1M, 150K/200K) - fully dynamic           |
+| Fast mode      | Claude Code JSON stdin | `⚡` after the model name, only while `/fast` is on |
+| Effort level   | Claude Code JSON stdin | Reasoning effort in parentheses (low/medium/high/xhigh/max), updates live with `/effort`; hidden for models without effort support |
+| Context window | Claude Code JSON stdin | Shows used/max (e.g. 300K/1M, 150K/200K) from exact token counts - fully dynamic |
 | Context % bar  | Claude Code JSON stdin | Color-coded progress bar: green (<50%), yellow (50-80%), red (>80%) |
-| Block timer    | ccusage (cached)       | 5-hour usage block countdown: green (>2h), yellow (>30m), red      |
+| Prompt cache   | Claude Code JSON stdin | Time until the prompt cache expires (yellow under 1m), or yellow `cold` once it has, shown in parentheses after the context %. A cold cache means the next message re-processes the whole conversation, which is slower and uses more of your plan limits. Hidden until the first response |
+| 5h limit       | Claude Code JSON stdin | Plan usage in the 5-hour window (same colors, bold from 80%) and time until it resets |
+| 7d limit       | Claude Code JSON stdin | Plan usage in the weekly window (same colors, bold from 80%) and time until it resets |
 
 **How it works:**
 
-- `statusline.sh` - fast renderer (<50ms), parses JSON + reads cache, runs on every status update
-- `statusline-refresh.sh` - background worker, calls ccusage every ~5min to refresh block timer cache
+- `statusline.sh` - fast renderer (~10ms, one `jq` call, no network), runs on every status update
+- The 5h/7d limits come from Claude Code's official `rate_limits` field (no ccusage or estimates). They only appear for claude.ai Pro/Max logins. A window drops out once it resets
+- Limits are shared across sessions via `~/.claude/statusline-limits.json`. Each session only receives new limits on its own responses, so every session merges in what it saw and shows the freshest reading. With many sessions open, idle ones stay accurate, and a new session shows limits before its first message. The file is only rewritten when a session sees newer data
+- `refreshInterval: 60` re-runs the script every minute so the reset countdowns stay current while the session is idle
+- Fits the window: Claude Code passes the terminal width (`COLUMNS`), and when the full line doesn't fit, parts are dropped in this order instead of the end getting cut off: context bar, 7d countdown, 5h countdown, context tokens, cache, effort. The model, context %, and 5h/7d usage always stay. For example, in a narrow pane:
+  ```
+  ◆ Opus 5.5 ⚡ │ 8% │ 5h 24% │ 7d 41%
+  ```
+  After resizing a window, the line adjusts on the next update (at most a minute, via `refreshInterval`)
 - No API tokens consumed, fully local
 
 ---
