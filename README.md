@@ -40,7 +40,7 @@ Add hooks and status line config (merge with any existing settings):
 "hooks": {
   "PreToolUse": [
     {
-      "matcher": "Bash",
+      "matcher": "Bash|PowerShell",
       "hooks": [
         {
           "type": "command",
@@ -91,9 +91,9 @@ Add hooks and status line config (merge with any existing settings):
 ```
 
 - `cleanupPeriodDays: 99999` keeps chat transcripts/session data effectively forever (~273 years). Claude Code auto-deletes session files older than this on startup; the default is only 30 days and there is no "never" value, so a large number is the supported way to retain history. [Docs](https://code.claude.com/docs/en/settings)
-- `env.CLAUDE_AFK_TIMEOUT_MS` (≈ max int) disables the AFK/idle timeout, so long-running prompts (e.g. `AskUserQuestion`) don't time out.
-- The `Stop` hook runs `notify-stop-sound.sh`, which plays a sound when Claude finishes a turn, but **only in the main chat**, staying silent when a background subagent/Agent-tool task completes (it reads the hook's JSON stdin and skips the sound when an `agent_id` is present). macOS `afplay`; swap the command inside the script on Linux/WSL.
-- `worktree.bgIsolation: "none"` is required alongside the worktree hook: the hook blocks *explicit* worktree tool calls, but the harness's automatic background-isolation worktree is governed only by this setting.
+- `env.CLAUDE_AFK_TIMEOUT_MS` (≈ max int) disables the AFK/idle timeout, so long-running prompts (e.g. `AskUserQuestion`) do not time out.
+- The `Stop` hook runs `notify-stop-sound.sh`, which plays a sound when Claude finishes a turn, but **only in the main chat**, staying silent when a background subagent/Agent-tool task completes (it reads the JSON stdin of the hook and skips the sound when an `agent_id` is present). macOS `afplay`; swap the command inside the script on Linux/WSL.
+- `worktree.bgIsolation: "none"` is required alongside the worktree hook: the hook blocks *explicit* worktree tool calls, but the automatic background-isolation worktree of the harness is governed only by this setting.
 
 ### 3. Dependencies
 
@@ -112,18 +112,18 @@ sudo apt install jq
 
 ---
 
-## What's included
+## What is included
 
 ### Skills
 
 | Skill      | Command   | What it does                                                                          |
 | ---------- | --------- | ------------------------------------------------------------------------------------- |
 | **commit** | `/commit` | Reads staged changes, writes a changelog-style commit message (sized to the change) to `COMMIT_MESSAGE.md` |
-| **verify** | `/verify` | Reviews unstaged changes - reports if they're safe, worth staging, or break something |
+| **verify** | `/verify` | Reviews unstaged changes - reports if they are safe, worth staging, or break something |
 | **explain** | `/explain [staged\|unstaged\|all\|<commit>\|<base>..<head>\|#PR] [engineer\|simple] [brief] [focus]` | Explains a change so you understand all of it: TL;DR, a before/after table, then each logical change walked through with a concrete scenario (real toy data run through the old and new code), the key code snippets, ripple effects, and easy-to-miss removals/defaults/config. Two modes: `engineer` (default) and `simple`, which rewrites it as plain-language user stories for a non-technical reader. `brief` keeps just the TL;DR and table. Read-only. |
-| **qa** | `/qa [staged\|unstaged] <the feature request>` | Feature review of changes (e.g. written by another AI agent) against what was asked - checks every requirement is done, finds bugs and missed places, checks it matches the project's style/UI and is light and fast, researches known pitfalls on the web, and lists unrelated changes in the diff neutrally |
+| **qa** | `/qa [staged\|unstaged] <the feature request>` | Feature review of changes (e.g. written by another AI agent) against what was asked - checks every requirement is done, finds bugs and missed places, checks it matches the style/UI of the project and is light and fast, researches known pitfalls on the web, and lists unrelated changes in the diff neutrally |
 | **spec** | `/spec <the rough idea>` | Turns a vague feature request into a full spec: researches the codebase and the web, asks only the real product decisions in batches of up to 4, then writes `specs/<feature>.md` with flows, every affected place, edge cases, approach, open stakeholder questions, and acceptance criteria |
-| **implement** | `/implement [codex\|cursor\|opencode][:model] <what to build>` | Delegates coding to another AI CLI (Codex, Cursor, or opencode) while Claude writes the spec, reviews the diff, and loops until every gate is green. Default tool and per-tool models are set in the skill's Config block; pick another per run with e.g. `/implement cursor ...` or `/implement codex:gpt-5.5 ...`. Starts a fresh implementer session when one gets long or slow. Requires the chosen CLI installed and authenticated. |
+| **implement** | `/implement [codex\|cursor\|opencode][:model] <what to build>` | Delegates coding to another AI CLI (Codex, Cursor, or opencode) while Claude writes the spec, reviews the diff, and loops until every gate is green. Default tool and per-tool models are set in the Config block of the skill; pick another per run with e.g. `/implement cursor ...` or `/implement codex:gpt-5.5 ...`. Starts a fresh implementer session when one gets long or slow. Requires the chosen CLI installed and authenticated. |
 
 **Feature workflow:** `/spec` to turn a vague request into a spec, then `/implement specs/<feature>.md` to build it, then `/qa staged <the request>` to check it against the spec.
 
@@ -133,10 +133,12 @@ sudo apt install jq
 
 | Hook                         | Event             | What it blocks                                                                                                                                                          |
 | ---------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **block-dangerous-commands** | PreToolUse (Bash) | sudo, doas, eval, rm on system/home dirs, git add/commit (user controls staging and commits), git force push/reset/clean/restore/rebase, DROP/TRUNCATE/DELETE, curl pipe to shell, npm publish, fork bombs, disk format ops |
+| **block-dangerous-commands** | PreToolUse (Bash, PowerShell) | Destructive commands on macOS, Linux and Windows: deletes outside the project or temp dirs, risky git operations (reset, clean, force push, history rewrites), disk/system wipes, destructive SQL, and cloud/infra deletes. Fails closed: if it cannot tell what a command will do, it blocks it. Needs `jq`; on native Windows it needs Git Bash to run. |
 | **block-worktrees** | PreToolUse (Agent, EnterWorktree, Bash) | All git worktree creation: `EnterWorktree` tool, Agent `isolation: "worktree"`, and `git worktree add` (allows list/remove/prune). Pair with `worktree.bgIsolation: "none"` in settings to also stop automatic background-isolation worktrees. |
 | **notify-stop-sound** | Stop | Plays a sound when Claude finishes a turn, but only in the main chat; silent for background subagents (skips when the hook payload carries an `agent_id`). |
-| **block-em-dashes** | PreToolUse (Write, Edit, MultiEdit, NotebookEdit, Bash, PowerShell) | Any em dash, en dash, or lookalike (figure dash, horizontal bar, two/three-em dash, small em dash, vertical dashes) or HTML entity that renders as one (named `mdash`/`ndash` entities or numeric ones like decimal 8212 and hex x2014) written into a file. Checks only the new text, so files with existing dashes can still be edited. Shell commands containing a dash are blocked unless every part is a read-only search (`grep`, `rg`, `find` without `-exec`, `git log/show/diff/grep`...) with no redirect, `tee`, heredoc, or other write. Tells Claude to use a comma, colon, semicolon, parentheses, a period, or a plain hyphen instead. Doesn't see files written by other tools (e.g. Codex/Cursor/opencode via `/implement`). |
+| **block-em-dashes** | PreToolUse (Write, Edit, MultiEdit, NotebookEdit, Bash, PowerShell) | Any em dash, en dash, or lookalike (figure dash, horizontal bar, two/three-em dash, small em dash, vertical dashes) or HTML entity that renders as one (named `mdash`/`ndash` entities or numeric ones like decimal 8212 and hex x2014) written into a file. Checks only the new text, so files with existing dashes can still be edited. Shell commands containing a dash are blocked unless every part is a read-only search (`grep`, `rg`, `find` without `-exec`, `git log/show/diff/grep`...) with no redirect, `tee`, heredoc, or other write. Tells Claude to use a comma, colon, semicolon, parentheses, a period, or a plain hyphen instead. Does not see files written by other tools (e.g. Codex/Cursor/opencode via `/implement`). |
+
+> **Note:** I recommend running Claude Code in **auto mode** and treating `block-dangerous-commands` as an extra safety layer on top of it, not a replacement. It catches the common ways things go wrong, but it is a pattern filter, not a sandbox, so it cannot catch everything.
 
 ### Status Line
 
@@ -160,10 +162,10 @@ Custom status bar displayed below the input box. Shows at a glance:
 **How it works:**
 
 - `statusline.sh` - fast renderer (~10ms, one `jq` call, no network), runs on every status update
-- The 5h/7d limits come from Claude Code's official `rate_limits` field (no ccusage or estimates). They only appear for claude.ai Pro/Max logins. A window drops out once it resets
+- The 5h/7d limits come from the official `rate_limits` field (no ccusage or estimates). They only appear for claude.ai Pro/Max logins. A window drops out once it resets
 - Limits are shared across sessions via `~/.claude/statusline-limits.json`. Each session only receives new limits on its own responses, so every session merges in what it saw and shows the freshest reading. With many sessions open, idle ones stay accurate, and a new session shows limits before its first message. The file is only rewritten when a session sees newer data
 - `refreshInterval: 60` re-runs the script every minute so the reset countdowns stay current while the session is idle
-- Fits the window: Claude Code passes the terminal width (`COLUMNS`), and when the full line doesn't fit, parts are dropped in this order instead of the end getting cut off: context bar, 7d countdown, 5h countdown, context tokens, cache, effort. The model, context %, and 5h/7d usage always stay. For example, in a narrow pane:
+- Fits the window: Claude Code passes the terminal width (`COLUMNS`), and when the full line does not fit, parts are dropped in this order instead of the end getting cut off: context bar, 7d countdown, 5h countdown, context tokens, cache, effort. The model, context %, and 5h/7d usage always stay. For example, in a narrow pane:
   ```
   ◆ Opus 5.5 ⚡ │ 8% │ 5h 24% │ 7d 41%
   ```
@@ -174,5 +176,5 @@ Custom status bar displayed below the input box. Shows at a glance:
 
 ## Credits
 
-- `/spec` borrows ideas (no code or text) from Matt Pocock's [grill-me](https://skillselion.com/skills/mattpocock/skills/grill-me) skill and GitHub [spec-kit](https://github.com/github/spec-kit)'s `/clarify` command
-- `/explain` borrows ideas (no code or text) from Chris Graffagnino's [explain-diff](https://github.com/Chris-Graffagnino/explain-diff) skill (audience modes, removed-behavior audit, stated vs inferred intent, no invented sections), Geoffrey Litt's [explain-diff](https://gist.github.com/geoffreylitt/a29df1b5f9865506e8952488eac3d524) prompt (toy-data examples, flow-ordered walkthrough), and prlens' [PR explanation guide](https://prlens.dev/guides/explain-a-pull-request-without-the-diff) (the "what does the system do now" TL;DR)
+- `/spec` borrows ideas (no code or text) from the [grill-me](https://skillselion.com/skills/mattpocock/skills/grill-me) skill by Matt Pocock and the `/clarify` command of GitHub [spec-kit](https://github.com/github/spec-kit)
+- `/explain` borrows ideas (no code or text) from the [explain-diff](https://github.com/Chris-Graffagnino/explain-diff) skill by Chris Graffagnino (audience modes, removed-behavior audit, stated vs inferred intent, no invented sections), the [explain-diff](https://gist.github.com/geoffreylitt/a29df1b5f9865506e8952488eac3d524) prompt by Geoffrey Litt (toy-data examples, flow-ordered walkthrough), and the prlens [PR explanation guide](https://prlens.dev/guides/explain-a-pull-request-without-the-diff) (the "what does the system do now" TL;DR)
